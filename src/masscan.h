@@ -62,6 +62,7 @@ enum OutputFormat {
     Output_None         = 0x0400,
     Output_Certs        = 0x0800,
     Output_Hostonly     = 0x1000,   /* -oH, "hostonly" */
+    Output_Kafka        = 0x2000,
     Output_All          = 0xFFBF,   /* not supported */
 };
 
@@ -455,13 +456,17 @@ struct Masscan
 
     char *bpf_filter;
 
-    struct {
-        ipaddress ip;
-        char    *password;
-        unsigned port;
-    } redis;
+    union {
+        struct {
+            ipaddress ip;
+            char    *password;
+            unsigned port;
+        } redis;
 
-
+        struct {
+            char brokers[64];
+        } kafka;
+    };
 
     /**
      * --min-packet

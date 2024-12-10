@@ -11,6 +11,14 @@
 
 #define MAX_BANNER_LENGTH 8192
 
+#ifdef KAFKA
+// Optional: kafka support.
+// We really need this lib for the 'batching features'. They bring immense performance gains,
+// and it would be a bit irrelevant to reimplement this ourselves...
+// See https://docs.confluent.io/platform/current/clients/librdkafka/html/md_INTRODUCTION.html#autotoc_md2
+#include <librdkafka/rdkafka.h>
+#endif
+
 struct Masscan;
 struct Output;
 enum ApplicationProtocol;
@@ -124,6 +132,13 @@ struct Output
         uint64_t outstanding;
         unsigned state;
     } redis;
+#ifdef KAFKA
+    struct {
+        char* brokers;
+        rd_kafka_conf_t *conf;
+        rd_kafka_t *rk;
+    } kafka;
+#endif
     struct {
         char *stylesheet;
     } xml;
@@ -134,6 +149,8 @@ const char *status_string(enum PortStatus x);
 const char *reason_string(int x, char *buffer, size_t sizeof_buffer);
 const char *normalize_string(const unsigned char *px, size_t length,
                              char *buf, size_t buf_len);
+const char *normalize_json_string(const unsigned char *px, size_t length,
+                                  char *buf, size_t buf_len);
 
 
 extern const struct OutputType text_output;
@@ -145,6 +162,9 @@ extern const struct OutputType certs_output;
 extern const struct OutputType binary_output;
 extern const struct OutputType null_output;
 extern const struct OutputType redis_output;
+#ifdef KAFKA
+extern const struct OutputType kafka_output;
+#endif
 extern const struct OutputType hostonly_output;
 extern const struct OutputType grepable_output;
 

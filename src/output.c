@@ -156,6 +156,37 @@ normalize_string(const unsigned char *px, size_t length,
     return buf;
 }
 
+const char *
+normalize_json_string(const unsigned char *px, size_t length,
+                 char *buf, size_t buf_len)
+{
+    size_t i=0;
+    size_t offset = 0;
+
+
+    for (i=0; i<length; i++) {
+        unsigned char c = px[i];
+
+        if (isprint(c) && c != '<' && c != '>' && c != '&' && c != '\\' && c != '\"' && c != '\'') {
+            if (offset + 2 < buf_len)
+                buf[offset++] = px[i];
+        } else {
+            if (offset + 7 < buf_len) {
+                buf[offset++] = '\\';
+                buf[offset++] = 'u';
+                buf[offset++] = '0';
+                buf[offset++] = '0';
+                buf[offset++] = "0123456789abcdef"[px[i]>>4];
+                buf[offset++] = "0123456789abcdef"[px[i]&0xF];
+            }
+        }
+    }
+
+    buf[offset] = '\0';
+
+    return buf;
+}
+
 
 /*****************************************************************************
  * PORTABILITY: WINDOWS
@@ -172,7 +203,7 @@ open_rotate(struct Output *out, const char *filename)
     int x;
 
     /*
-     * KLUDGE: do something special for redis
+     * KLUDGE: do something special for redis / kafka
      */
     if (out->format == Output_Redis) {
         ptrdiff_t fd = out->redis.fd;
@@ -196,6 +227,55 @@ open_rotate(struct Output *out, const char *filename)
         out->funcs->open(out, (FILE*)fd);
 
         return (FILE*)fd;
+#ifdef KAFKA
+    } else if (out->format == Output_Kafka) {
+        if (out->kafka.conf == NULL) {
+            rd_kafka_conf_res_t res;
+            char errstr[512];
+
+            rd_kafka_conf_t *conf = rd_kafka_conf_new();
+
+            // Configure kafka
+            res = rd_kafka_conf_set(conf, "bootstrap.servers", out->kafka.brokers,
+                    errstr, sizeof(errstr));
+            if (res != RD_KAFKA_CONF_OK) {
+                LOG(0, "kafka: %s\n", errstr);
+                rd_kafka_conf_destroy(conf);
+                exit(1);
+            }
+
+            res = rd_kafka_conf_set(conf, "enable.idempotence", "true",
+                    errstr, sizeof(errstr));
+            if (res != RD_KAFKA_CONF_OK) {
+                LOG(0, "kafka: %s\n", errstr);
+                rd_kafka_conf_destroy(conf);
+                exit(1);
+            }
+
+            res = rd_kafka_conf_set(conf, "batch.num.messages", "100",
+                    errstr, sizeof(errstr));
+            if (res != RD_KAFKA_CONF_OK) {
+                LOG(0, "kafka: %s\n", errstr);
+                rd_kafka_conf_destroy(conf);
+                exit(1);
+            }
+            out->kafka.conf = conf;
+
+            // Create new kafka producer
+            out->kafka.rk = rd_kafka_new(
+                RD_KAFKA_PRODUCER,
+                out->kafka.conf,
+                errstr,
+                sizeof(errstr)
+            );
+            if (!out->kafka.rk) {
+                LOG(0, "kafka: %s\n", errstr);
+                rd_kafka_conf_destroy(conf);
+                exit(1);
+            }
+        }
+        return (FILE*)-1;
+#endif
     }
 
     /* Do something special for the "-" filename */
@@ -250,6 +330,24 @@ close_rotate(struct Output *out, FILE *fp)
     /* Redis Kludge*/
     if (out->format == Output_Redis)
         return;
+
+#ifdef KAFKA
+    /*
+     * When using Kafka output, flush any final messages then destroy.
+     * Idk what kludge means but Kludge !
+     */
+    if (out->format == Output_Kafka) {
+        rd_kafka_flush(out->kafka.rk, 10 * 1000 /* wait for max 10 seconds */);
+
+        if (rd_kafka_outq_len(out->kafka.rk) > 0)
+            LOG(0, "kafka: %d message(s) were not delivered\n",
+                   rd_kafka_outq_len(out->kafka.rk));
+
+        /* Destroy the producer instance */
+        rd_kafka_destroy(out->kafka.rk);
+        return;
+    }
+#endif
 
     fflush(fp);
     fclose(fp);
@@ -394,6 +492,9 @@ output_create(const struct Masscan *masscan, unsigned thread_index)
     out->redis.port = masscan->redis.port;
     out->redis.ip = masscan->redis.ip;
     out->redis.password = masscan ->redis.password;
+#ifdef KAFKA
+    out->kafka.brokers = duplicate_string(masscan->kafka.brokers);
+#endif
     out->is_banner = masscan->is_banners;               /* --banners */
     out->is_banner_rawudp = masscan->is_banners_rawudp; /* --rawudp */
     out->is_gmt = masscan->is_gmt;
@@ -446,6 +547,11 @@ output_create(const struct Masscan *masscan, unsigned thread_index)
     case Output_Redis:
         out->funcs = &redis_output;
         break;
+#ifdef KAFKA
+    case Output_Kafka:
+        out->funcs = &kafka_output;
+        break;
+#endif
     case Output_Hostonly:
         out->funcs = &hostonly_output;
         break;

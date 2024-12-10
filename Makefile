@@ -96,6 +96,11 @@ INCLUDES = -I.
 FLAGS2 =
 endif
 
+# Optional kafka usage
+ifeq ($(KAFKA),1)
+LIBS += -lrdkafka
+FLAGS2 += -DKAFKA
+endif
 
 DEFINES = 
 CFLAGS = -g -ggdb $(FLAGS2) $(INCLUDES) $(DEFINES) -Wall -O2

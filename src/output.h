@@ -125,6 +125,11 @@ struct Output
         unsigned state;
     } redis;
     struct {
+        ipaddress ip;
+        unsigned port;
+        ptrdiff_t fd;
+    } kafka;
+    struct {
         char *stylesheet;
     } xml;
 };
@@ -145,6 +150,7 @@ extern const struct OutputType certs_output;
 extern const struct OutputType binary_output;
 extern const struct OutputType null_output;
 extern const struct OutputType redis_output;
+extern const struct OutputType kafka_output;
 extern const struct OutputType hostonly_output;
 extern const struct OutputType grepable_output;
 

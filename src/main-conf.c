@@ -1668,6 +1668,11 @@ static int SET_output_format(struct Masscan *masscan, const char *name, const ch
                 fprintf(fp, "output-format = redis\n");
                 fprintf(fp, "redis = %s %u\n", fmt.string, masscan->redis.port);
                 break;
+            case Output_Kafka:
+                fmt = ipaddress_fmt(masscan->kafka.ip);
+                fprintf(fp, "output-format = kafka\n");
+                fprintf(fp, "kafka = %s %u\n", fmt.string, masscan->kafka.port);
+                break;
                 
             default:
                 fprintf(fp, "output-format = unknown(%u)\n", masscan->output.format);
@@ -1688,6 +1693,7 @@ static int SET_output_format(struct Masscan *masscan, const char *name, const ch
     else if (EQUALS("certs", value))        x = Output_Certs;
     else if (EQUALS("none", value))         x = Output_None;
     else if (EQUALS("redis", value))        x = Output_Redis;
+    else if (EQUALS("kafka", value))        x = Output_Kafka;
     else if (EQUALS("hostonly", value))     x = Output_Hostonly;
     else {
         LOG(0, "FAIL: unknown output-format: %s\n", value);
@@ -2873,15 +2879,20 @@ masscan_set_parameter(struct Masscan *masscan,
         masscan->op = Operation_ReadRange;
     } else if (EQUALS("reason", name)) {
         masscan->output.is_reason = 1;
-    } else if (EQUALS("redis", name)) {
+    } else if (EQUALS("redis", name) || EQUALS("kafka", name)) {
         struct Range range;
         unsigned offset = 0;
         unsigned max_offset = (unsigned)strlen(value);
-        unsigned port = 6379;
+        unsigned port;
+        if (EQUALS("redis", name)) {
+            port = 6379;
+        } else {
+            port = 9092;
+        }
 
         range = range_parse_ipv4(value, &offset, max_offset);
         if ((range.begin == 0 && range.end == 0) || range.begin != range.end) {
-            LOG(0, "FAIL:  bad redis IP address: %s\n", value);
+            LOG(0, "FAIL: bad IP address: %s\n", value);
             exit(1);
         }
         if (offset < max_offset) {
@@ -2890,21 +2901,30 @@ masscan_set_parameter(struct Masscan *masscan,
             if (offset+1 < max_offset && value[offset] == ':' && isdigit(value[offset+1]&0xFF)) {
                 port = (unsigned)strtoul(value+offset+1, 0, 0);
                 if (port > 65535 || port == 0) {
-                    LOG(0, "FAIL: bad redis port: %s\n", value+offset+1);
+                    LOG(0, "FAIL: bad port: %s\n", value+offset+1);
                     exit(1);
                 }
             }
         }
 
         /* TODO: add support for connecting to IPv6 addresses here */
-        masscan->redis.ip.ipv4 = range.begin;
-        masscan->redis.ip.version = 4;
-
-        masscan->redis.port = port;
-        masscan->output.format = Output_Redis;
-        safe_strcpy(masscan->output.filename, 
-                 sizeof(masscan->output.filename), 
-                 "<redis>");
+        if (EQUALS("redis", name)) {
+            masscan->redis.ip.ipv4 = range.begin;
+            masscan->redis.ip.version = 4;
+            masscan->redis.port = port;
+            masscan->output.format = Output_Redis;
+            safe_strcpy(masscan->output.filename,
+                     sizeof(masscan->output.filename),
+                     "<redis>");
+        } else {
+            masscan->kafka.ip.ipv4 = range.begin;
+            masscan->kafka.ip.version = 4;
+            masscan->kafka.port = port;
+            masscan->output.format = Output_Kafka;
+            safe_strcpy(masscan->output.filename,
+                     sizeof(masscan->output.filename),
+                     "<kafka>");
+        }
     } else if(EQUALS("redis-pwd", name)) {
         masscan->redis.password = strdup(value);
     } else if (EQUALS("release-memory", name)) {

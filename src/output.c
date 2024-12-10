@@ -172,26 +172,35 @@ open_rotate(struct Output *out, const char *filename)
     int x;
 
     /*
-     * KLUDGE: do something special for redis
+     * KLUDGE: do something special for redis / kafka
      */
-    if (out->format == Output_Redis) {
+    if (out->format == Output_Redis || out->format == Output_Kafka) {
         ptrdiff_t fd = out->redis.fd;
         if (fd < 1) {
             struct sockaddr_in sin = {0};
             fd = (ptrdiff_t)socket(AF_INET, SOCK_STREAM, 0);
             if (fd == -1) {
-                LOG(0, "redis: socket() failed to create socket\n");
+                LOG(0, "redis/kafka: socket() failed to create socket\n");
                 exit(1);
             }
-            sin.sin_addr.s_addr = htonl(out->redis.ip.ipv4); /* TODO: IPv6 */
-            sin.sin_port = htons((unsigned short)out->redis.port);
+            if (out->format == Output_Redis) {
+                sin.sin_addr.s_addr = htonl(out->redis.ip.ipv4); /* TODO: IPv6 */
+                sin.sin_port = htons((unsigned short)out->redis.port);
+            } else {
+                sin.sin_addr.s_addr = htonl(out->kafka.ip.ipv4); /* TODO: IPv6 */
+                sin.sin_port = htons((unsigned short)out->kafka.port);
+            }
             sin.sin_family = AF_INET;
             x = connect((SOCKET)fd, (struct sockaddr*)&sin, sizeof(sin));
             if (x != 0) {
-                LOG(0, "redis: connect() failed\n");
+                LOG(0, "redis/kafka: connect() failed\n");
                 perror("connect");
             }
-            out->redis.fd = fd;
+            if (out->format == Output_Redis) {
+                out->redis.fd = fd;
+            } else {
+                out->redis.fd = fd;
+            }
         }
         out->funcs->open(out, (FILE*)fd);
 
@@ -248,7 +257,7 @@ close_rotate(struct Output *out, FILE *fp)
     memset(&out->counts, 0, sizeof(out->counts));
 
     /* Redis Kludge*/
-    if (out->format == Output_Redis)
+    if (out->format == Output_Redis || out->format == Output_Kafka)
         return;
 
     fflush(fp);
@@ -394,6 +403,8 @@ output_create(const struct Masscan *masscan, unsigned thread_index)
     out->redis.port = masscan->redis.port;
     out->redis.ip = masscan->redis.ip;
     out->redis.password = masscan ->redis.password;
+    out->kafka.port = masscan->kafka.port;
+    out->kafka.ip = masscan->kafka.ip;
     out->is_banner = masscan->is_banners;               /* --banners */
     out->is_banner_rawudp = masscan->is_banners_rawudp; /* --rawudp */
     out->is_gmt = masscan->is_gmt;
@@ -445,6 +456,9 @@ output_create(const struct Masscan *masscan, unsigned thread_index)
         break;
     case Output_Redis:
         out->funcs = &redis_output;
+        break;
+    case Output_Kafka:
+        out->funcs = &kafka_output;
         break;
     case Output_Hostonly:
         out->funcs = &hostonly_output;
